@@ -8,7 +8,9 @@ IGNORED_LAYERS = []
 
 
 def flops(model):
-    conv_layers = ["Conv2d", "ConvTranspose2d"]
+    conv1d_layers = ["Conv1d", "ConvTranspose1d"]
+    conv2d_layers = ["Conv2d", "ConvTranspose2d"]
+    linear_layers = ["Linear"]
     layers = [
         module for module in model.modules() if type(module) != nn.Sequential]
     c_i, w_i, h_i = INPUT_SHAPE
@@ -22,8 +24,8 @@ def flops(model):
     for layer in layers:
         layer_name = str(layer).split("(")[0]
 
-        # Convolutions
-        if layer_name in conv_layers:
+        # 1D convolutions
+        if layer_name in conv1d_layers:
 
             # Kernel, padding, stride, bias, input channels, output channels
             k = layer.kernel_size[0]
@@ -35,10 +37,42 @@ def flops(model):
 
             # Output width and height
             border_size = 2 * ((k-1) // 2 - p)
-            if layer_name == conv_layers[0]:
+            if layer_name == conv1d_layers[0]:
                 w_o = w_i // s - border_size
                 h_o = h_i // s - border_size
-            elif layer_name == conv_layers[1]:
+            elif layer_name == conv1d_layers[1]:
+                w_o = w_i * s + border_size
+                h_o = h_i * s + border_size
+
+            # Flops
+            multiplications = w_o * h_o * c_o * k * c_i
+            additions = w_o * h_o * c_o * (k * c_i - 1 + b)
+            total_additions += additions
+            total_multiplications += multiplications
+            total_number_of_parameters += (k * c_i + b) * c_o
+
+            # Update next layer input shapes
+            c_i = c_o
+            w_i = w_o
+            h_i = h_o
+
+        # 2D convolutions
+        elif layer_name in conv2d_layers:
+
+            # Kernel, padding, stride, bias, input channels, output channels
+            k = layer.kernel_size[0]
+            p = layer.padding[0]
+            s = layer.stride[0]
+            b = 0 if layer.bias is None else 1
+            c_i = layer.in_channels
+            c_o = layer.out_channels
+
+            # Output width and height
+            border_size = 2 * ((k-1) // 2 - p)
+            if layer_name == conv2d_layers[0]:
+                w_o = w_i // s - border_size
+                h_o = h_i // s - border_size
+            elif layer_name == conv2d_layers[1]:
                 w_o = w_i * s + border_size
                 h_o = h_i * s + border_size
 
@@ -53,6 +87,23 @@ def flops(model):
             c_i = c_o
             w_i = w_o
             h_i = h_o
+
+        # Linear
+        elif layer_name in linear_layers:
+            f_i = layer.in_features
+            f_o = layer.out_features
+            b = 0 if layer.bias is None else 1
+
+            multiplications = f_i * f_o
+            additions = b * f_o
+            total_additions += additions
+            total_multiplications += multiplications
+            total_number_of_parameters += multiplications + additions
+
+            # Update next layer input shapes
+            c_i = 1
+            w_i = f_o
+            h_i = 1
 
         # Activations
         elif layer_name in SINGLE_VALUE_OPERATIONS:
