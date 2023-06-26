@@ -1,16 +1,43 @@
 import torch.nn as nn
-from network import Net
+from config import CONFIG
 
 
-INPUT_SHAPE = (3, 256, 256)
+INPUT_SHAPE = (1, 1, 256)
 SINGLE_VALUE_OPERATIONS = ["ReLU", "Sigmoid", "Tanh"]
+POOL1D_LAYERS = ["MaxPool1d", "AvgPool1d"]
+CONV1D_LAYERS = ["Conv1d", "ConvTranspose1d"]
+CONV2D_LAYERS = ["Conv2d", "ConvTranspose2d"]
+LINEAR_LAYERS = ["Linear"]
 IGNORED_LAYERS = []
 
 
+def conv1dOperations(layer_name, w_i, h_i, k, p, s, b, c_i, c_o):
+    # Output width and height
+    border_size = 2 * ((k-1) // 2 - p)
+    if layer_name == CONV1D_LAYERS[0] or layer_name in POOL1D_LAYERS:
+        w_o = w_i // s - border_size
+        h_o = h_i // s - border_size
+    elif layer_name == CONV1D_LAYERS[1]:
+        w_o = w_i * s + border_size
+        h_o = h_i * s + border_size
+    w_o = max(w_o, 1)
+    h_o = max(h_o, 1)
+
+    # Flops
+    multiplications = w_o * h_o * c_o * k * c_i
+    additions = w_o * h_o * c_o * (k * c_i - 1 + b)
+    parameters = (k * c_i + b) * c_o
+
+    return (
+        multiplications,
+        additions,
+        parameters,
+        w_o,
+        h_o,
+    )
+
+
 def flops(model):
-    conv1d_layers = ["Conv1d", "ConvTranspose1d"]
-    conv2d_layers = ["Conv2d", "ConvTranspose2d"]
-    linear_layers = ["Linear"]
     layers = [
         module for module in model.modules() if type(module) != nn.Sequential]
     c_i, w_i, h_i = INPUT_SHAPE
@@ -25,7 +52,7 @@ def flops(model):
         layer_name = str(layer).split("(")[0]
 
         # 1D convolutions
-        if layer_name in conv1d_layers:
+        if layer_name in CONV1D_LAYERS:
 
             # Kernel, padding, stride, bias, input channels, output channels
             k = layer.kernel_size[0]
@@ -35,29 +62,48 @@ def flops(model):
             c_i = layer.in_channels
             c_o = layer.out_channels
 
-            # Output width and height
-            border_size = 2 * ((k-1) // 2 - p)
-            if layer_name == conv1d_layers[0]:
-                w_o = w_i // s - border_size
-                h_o = h_i // s - border_size
-            elif layer_name == conv1d_layers[1]:
-                w_o = w_i * s + border_size
-                h_o = h_i * s + border_size
-
-            # Flops
-            multiplications = w_o * h_o * c_o * k * c_i
-            additions = w_o * h_o * c_o * (k * c_i - 1 + b)
-            total_additions += additions
+            # Compute ops
+            (
+                multiplications,
+                additions,
+                parameters,
+                w_o,
+                h_o,
+            ) = conv1dOperations(layer_name, w_i, h_i, k, p, s, b, c_i, c_o)
             total_multiplications += multiplications
-            total_number_of_parameters += (k * c_i + b) * c_o
+            total_additions += additions
+            total_number_of_parameters += parameters
 
             # Update next layer input shapes
             c_i = c_o
             w_i = w_o
             h_i = h_o
 
+        # 1D pooling
+        elif layer_name in POOL1D_LAYERS:
+
+            # Kernel, padding, stride, bias, input channels, output channels
+            k = layer.kernel_size
+            p = layer.padding
+            s = layer.stride
+            b = 0
+
+            # Compute ops
+            (
+                _,
+                additions,
+                _,
+                w_o,
+                h_o,
+            ) = conv1dOperations(layer_name, w_i, h_i, k, p, s, b, c_i, c_o)
+            total_additions += additions
+
+            # Update next layer input shapes
+            w_i = w_o
+            h_i = h_o
+
         # 2D convolutions
-        elif layer_name in conv2d_layers:
+        elif layer_name in CONV2D_LAYERS:
 
             # Kernel, padding, stride, bias, input channels, output channels
             k = layer.kernel_size[0]
@@ -69,10 +115,10 @@ def flops(model):
 
             # Output width and height
             border_size = 2 * ((k-1) // 2 - p)
-            if layer_name == conv2d_layers[0]:
+            if layer_name == CONV2D_LAYERS[0]:
                 w_o = w_i // s - border_size
                 h_o = h_i // s - border_size
-            elif layer_name == conv2d_layers[1]:
+            elif layer_name == CONV2D_LAYERS[1]:
                 w_o = w_i * s + border_size
                 h_o = h_i * s + border_size
 
@@ -89,7 +135,7 @@ def flops(model):
             h_i = h_o
 
         # Linear
-        elif layer_name in linear_layers:
+        elif layer_name in LINEAR_LAYERS:
             f_i = layer.in_features
             f_o = layer.out_features
             b = 0 if layer.bias is None else 1
@@ -115,6 +161,7 @@ def flops(model):
 
         # Ignored layers
         elif layer_name in IGNORED_LAYERS:
+            print(layer_name)
             continue
 
         # Not defined counting method for these layers
@@ -143,6 +190,7 @@ def flops(model):
     printFlops(
         flop_names, flop_values, total_number_of_flops,
         total_number_of_parameters)
+    return total_number_of_flops
 
 
 def printFlops(
@@ -182,8 +230,9 @@ def printFlops(
 
 
 def main():
-    model = Net()
+    model = CONFIG.MODELS[0]
     flops(model)
 
 
-main()
+if __name__ == "__main__":
+    main()
