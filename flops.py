@@ -41,6 +41,7 @@ def flops(model):
     layers = [
         module for module in model.modules() if type(module) != nn.Sequential]
     c_i, w_i, h_i = INPUT_SHAPE
+    c_o, w_o, h_o = c_i, w_i, h_i
     total_additions = 0
     total_multiplications = 0
     total_single_value_operations = {}
@@ -86,6 +87,9 @@ def flops(model):
             k = layer.kernel_size
             p = layer.padding
             s = layer.stride
+            k = k[0] if type(k) == tuple else k
+            p = p[0] if type(p) == tuple else p
+            s = s[0] if type(s) == tuple else s
             b = 0
 
             # Compute ops
