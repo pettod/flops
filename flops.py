@@ -1,3 +1,7 @@
+import os
+import sys
+sys.path.append(os.getcwd())
+
 import torch.nn as nn
 from config import CONFIG
 
@@ -47,10 +51,15 @@ def flops(model):
     total_single_value_operations = {}
     total_number_of_parameters = 0
     not_counted_layers = []
+    layer_specific_flops = []
 
     # Loop every layer
     for layer in layers:
         layer_name = str(layer).split("(")[0]
+        additions = 0
+        multiplications = 0
+        activations = 0
+        parameters = 0
 
         # 1D convolutions
         if layer_name in CONV1D_LAYERS:
@@ -130,9 +139,10 @@ def flops(model):
             # Flops
             multiplications = w_o * h_o * c_o * k**2 * c_i
             additions = w_o * h_o * c_o * (k**2 * c_i - 1 + b)
+            parameters = (k**2 * c_i + b) * c_o
             total_additions += additions
             total_multiplications += multiplications
-            total_number_of_parameters += (k**2 * c_i + b) * c_o
+            total_number_of_parameters += parameters
 
             # Update next layer input shapes
             c_i = c_o
@@ -147,9 +157,10 @@ def flops(model):
 
             multiplications = f_i * f_o
             additions = f_o * (f_i - 1 + b)
+            parameters = multiplications + b * f_o
             total_additions += additions
             total_multiplications += multiplications
-            total_number_of_parameters += multiplications + additions
+            total_number_of_parameters += parameters
 
             # Update next layer input shapes
             c_i = 1
@@ -172,6 +183,16 @@ def flops(model):
         # Not defined counting method for these layers
         else:
             not_counted_layers.append(layer_name)
+
+        # Layer specific flops
+        output_shape = f"{c_o}x{h_o}" if w_o == 1 else f"{c_o}x{h_o}x{w_o}"
+        layer_specific_flops.append([
+            layer_name,
+            "{:,}".format(sum([additions, multiplications, activations])),
+            "{:,}".format(parameters),
+            output_shape,
+        ])
+
     if len(not_counted_layers):
         print("Flops are not counted for the following layers:")
         for layer_name in not_counted_layers:
@@ -194,13 +215,13 @@ def flops(model):
     # Print
     printFlops(
         flop_names, flop_values, total_number_of_flops,
-        total_number_of_parameters)
+        total_number_of_parameters, layer_specific_flops)
     return total_number_of_flops
 
 
 def printFlops(
         flop_names, flop_values, total_number_of_flops,
-        total_number_of_parameters):
+        total_number_of_parameters, layer_specific_flops):
     longest_value_length = 0
     for i in range(len(flop_values)):
         flop_values[i] = "{:,}".format(flop_values[i])
@@ -232,6 +253,52 @@ def printFlops(
         number_of_spaces = \
             30 - len(text) + longest_value_length - len(text_number)
         print("{}{}{}".format(text, " " * number_of_spaces, text_number))
+    print(45 * "=")
+    print()
+    def maxLen(words):
+        max_len = 0
+        for word in words:
+            if len(word) > max_len:
+                max_len = len(word)
+        return max_len
+    max_len_0 = maxLen([lsf[0] for lsf in layer_specific_flops] + ["Layer"])
+    max_len_1 = maxLen([lsf[1] for lsf in layer_specific_flops] + ["Flops", "{:,}".format(total_number_of_flops)])
+    max_len_2 = maxLen([lsf[2] for lsf in layer_specific_flops] + ["Parameters", "{:,}".format(total_number_of_parameters)])
+    max_len_3 = maxLen([lsf[3] for lsf in layer_specific_flops] + ["Output shape"])
+    min_padding = 5
+    total_length = max_len_0 + max_len_1 + max_len_2 + max_len_3 + 3 * min_padding
+    print(total_length * "=")
+    print("{}{}{}{}{}{}{}".format(
+        "Layer",
+        " " * (min_padding + max_len_0 - len("Layer")),
+        "Flops",
+        " " * (min_padding + max_len_1 - len("Flops")),
+        "Parameters",
+        " " * (min_padding + max_len_2 - len("Parameters")),
+        "Output shape"
+    ))
+    print(total_length * "-")
+    for layer, flops, parameters, output_shape in layer_specific_flops:
+        print("{}{}{}{}{}{}{}".format(
+            layer,
+            " " * (min_padding + max_len_0 - len(layer) + max_len_1 - len(flops)),
+            flops,
+            " " * (min_padding + max_len_2 - len(parameters)),
+            parameters,
+            " " * (min_padding + max_len_3 - len(output_shape)),
+            output_shape,
+        ))
+    print(total_length * "=")
+    print("{}{}{}{}{}{}{}".format(
+        "Total",
+        " " * (min_padding + max_len_0 - len("Total") + max_len_1 - len("{:,}".format(total_number_of_flops))),
+        "{:,}".format(total_number_of_flops),
+        " " * (min_padding + max_len_2 - len("{:,}".format(total_number_of_parameters))),
+        "{:,}".format(total_number_of_parameters),
+        " " * (min_padding + max_len_3 - len(output_shape)),
+        output_shape
+    ))
+    print()
 
 
 def main():
