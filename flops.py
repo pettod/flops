@@ -145,7 +145,7 @@ def flops(model):
             b = 0 if layer.bias is None else 1
 
             multiplications = f_i * f_o
-            additions = b * f_o
+            additions = f_o * (f_i - 1 + b)
             total_additions += additions
             total_multiplications += multiplications
             total_number_of_parameters += multiplications + additions
