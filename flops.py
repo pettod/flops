@@ -6,12 +6,16 @@ import torch.nn as nn
 from config import CONFIG
 
 
-INPUT_SHAPE = (1, 1, 256)
+INPUT_SHAPE = (1, 1, 256)  # Set manually
+
+# Implemented layer types
 SINGLE_VALUE_OPERATIONS = ["ReLU", "Sigmoid", "Tanh"]
 POOL1D_LAYERS = ["MaxPool1d", "AvgPool1d"]
 CONV1D_LAYERS = ["Conv1d", "ConvTranspose1d"]
 CONV2D_LAYERS = ["Conv2d", "ConvTranspose2d"]
 LINEAR_LAYERS = ["Linear"]
+FLATTEN_LAYER = "Flatten"
+
 IGNORED_LAYERS = []
 
 
@@ -162,10 +166,14 @@ def flops(model):
             total_multiplications += multiplications
             total_number_of_parameters += parameters
 
+            c_o = f_o
+            w_o = 1
+            h_o = 1
+
             # Update next layer input shapes
-            c_i = 1
-            w_i = f_o
-            h_i = 1
+            c_i = c_o
+            w_i = w_o
+            h_i = h_o
 
         # Activations
         elif layer_name in SINGLE_VALUE_OPERATIONS:
@@ -174,6 +182,17 @@ def flops(model):
                 total_single_value_operations[layer_name] += activations
             else:
                 total_single_value_operations[layer_name] = activations
+
+        # Flatten
+        elif layer_name == FLATTEN_LAYER:
+            c_o = c_o * w_o * h_o
+            h_o = 1
+            w_o = 1
+
+            # Update next layer input shapes
+            h_i = h_o
+            c_i = c_o
+            w_i = w_o
 
         # Ignored layers
         elif layer_name in IGNORED_LAYERS:
@@ -185,7 +204,11 @@ def flops(model):
             not_counted_layers.append(layer_name)
 
         # Layer specific flops
-        output_shape = f"{c_o}x{h_o}" if w_o == 1 else f"{c_o}x{h_o}x{w_o}"
+        output_shape = f"{c_o}x{h_o}x{w_o}"
+        if w_o == 1 and h_o == 1:
+            output_shape = f"{c_o}"
+        elif w_o == 1:
+            output_shape = f"{c_o}x{h_o}"
         layer_specific_flops.append([
             layer_name,
             "{:,}".format(sum([additions, multiplications, activations])),
