@@ -88,6 +88,7 @@ def flops(model):
             p = layer.padding
             s = layer.stride
             k = k[0] if type(k) == tuple else k
+            k -= 1
             p = p[0] if type(p) == tuple else p
             s = s[0] if type(s) == tuple else s
             b = 0
